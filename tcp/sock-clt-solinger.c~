@@ -1,0 +1,112 @@
+/*
+ * sock-clt-solinger.c
+ *
+ *  Created on: 2016/9/10
+ *      Author: Luo Guochun
+ */
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <string.h>
+#include <netdb.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <getopt.h>
+
+static int tcp_connect(char *addr, int port) {
+	int s = -1, rv;
+	char portstr[6]; /* strlen("65535") + 1; */
+	struct addrinfo hints, *servinfo, *p;
+
+	snprintf(portstr, sizeof(portstr), "%d", port);
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	if ((rv = getaddrinfo(addr, portstr, &hints, &servinfo)) != 0) {
+		printf("%s", gai_strerror(rv));
+		return -1;
+	}
+	for (p = servinfo; p != NULL; p = p->ai_next) {
+		/* Try to create the socket and to connect it.
+		 * If we fail in the socket() call, or on connect(), we retry with
+		 * the next entry in servinfo. */
+		if ((s = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
+			continue;
+
+		struct linger linger;
+		linger.l_onoff = 1;
+		linger.l_linger = 0;
+
+		if (setsockopt(s, SOL_SOCKET, SO_LINGER, &linger, sizeof(linger)) == -1) {
+			printf("setsockopt SO_LINGER: %s", strerror(errno));
+			s = -1;
+			return -1;
+		}
+		if (connect(s, p->ai_addr, p->ai_addrlen) == -1) {
+			/* If the socket is non-blocking, it is ok for connect() to
+			 * return an EINPROGRESS error here. */
+			close(s);
+			s = -1;
+			continue;
+		}
+
+		/* If we ended an iteration of the for loop without errors, we
+		 * have a connected socket. Let's return to the caller. */
+		break;
+	}
+	if (p == NULL)
+		printf("creating socket: %s", strerror(errno));
+
+	freeaddrinfo(servinfo);
+	return s;
+}
+
+int main(int argc, char **argv)
+{
+    extern char *optarg;
+
+    int optch;
+    char optstring[] = "h:p:";
+
+    char host[1024] = {0};
+    int port = 0;
+    //读取命令行参数
+    while ((optch = getopt(argc, argv, optstring)) != -1) {
+        switch (optch) {
+        case 'h':
+            strncpy(host, optarg, sizeof(host) - 1);
+            break;
+        case 'p':
+            port = atoi(optarg);
+            break;
+        default:
+            printf("%s -h <ip/host> -p <port>\n", argv[0]);
+            exit(0);
+        }
+    }
+    if(strlen(host) == 0 || port <= 0) {
+        printf("host/ip/port is not valid: host=%s, port=%d\n", host, port);
+        exit(0);
+    }
+
+    int s = tcp_connect(host, port);
+    if(s <= 0) {
+        printf("connect to host failed: host=%s, port=%d\n", host, port);
+        exit(0);
+    }
+
+    printf("socket connect: host=%s, port=%d\n", host, port);
+    printf("sleep for seconds\n");
+    sleep(5);
+    close(s);
+
+    return 0;
+}
